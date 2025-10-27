@@ -1,0 +1,107 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Template para configurar S3, Lambda e S3 Object Lambda
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: Nome único para o bucket S3
+    Default: luanaflues-bucket-us-east-2-2025
+  LambdaFunctionName:
+    Type: String
+    Description: Nome da função Lambda
+    Default: LuanaLambdaFunction
+
+Resources:
+  # Bucket S3
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+
+  # Função Lambda
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Ref LambdaFunctionName
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          def lambda_handler(event, context):
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps('Hello from Lambda!')
+              }
+      Runtime: python3.9
+      Timeout: 30
+
+  # Papel IAM para Lambda
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaS3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource: !Sub arn:aws:s3:::${BucketName}/*
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+  # S3 Access Point
+  S3AccessPoint:
+    Type: AWS::S3::AccessPoint
+    Properties:
+      Bucket: !Ref S3Bucket
+      Name: luana-access-point
+
+  # S3 Object Lambda Access Point
+  ObjectLambdaAccessPoint:
+    Type: AWS::S3ObjectLambda::AccessPoint
+    Properties:
+      Name: luana-object-lambda
+      ObjectLambdaConfiguration:
+        SupportingAccessPoint: !Sub arn:aws:s3:us-east-2:${AWS::AccountId}:accesspoint/luana-access-point
+        CloudWatchMetricsEnabled: true
+        TransformationConfigurations:
+          - Actions:
+              - GetObject
+            ContentTransformation:
+              AwsLambda:
+                FunctionArn: !GetAtt LambdaFunction.Arn
+
+  # Permissão para Lambda
+  LambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LambdaFunction
+      Action: lambda:InvokeFunction
+      Principal: s3-object-lambda.amazonaws.com
+      SourceArn: !Sub arn:aws:s3-object-lambda:us-east-2:${AWS::AccountId}:accesspoint/luana-object-lambda
+
+Outputs:
+  BucketName:
+    Description: Nome do bucket S3
+    Value: !Ref S3Bucket
+  LambdaFunctionArn:
+    Description: ARN da função Lambda
+    Value: !GetAtt LambdaFunction.Arn
+  ObjectLambdaAccessPointArn:
+    Description: ARN do S3 Object Lambda Access Point
+    Value: !Sub arn:aws:s3-object-lambda:us-east-2:${AWS::AccountId}:accesspoint/luana-object-lambda
